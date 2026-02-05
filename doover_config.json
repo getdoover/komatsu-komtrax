@@ -1,51 +1,84 @@
 {
     "komatsu_komtrax": {
         "name": "komatsu_komtrax",
-        "display_name": "komatsu-komtrax",
-        "type": "DEV",
+        "display_name": "Komatsu Komtrax",
+        "type": "PRO",
         "visibility": "PUB",
         "allow_many": true,
         "description": "Integrates with Komatsu Komtrax API for equipment monitoring",
         "long_description": "README.md",
         "depends_on": [],
-        "owner_org_key": "FIX-ME",
-        "image_name": "ghcr.io/getdoover/komatsu-komtrax:main",
-        "container_registry_profile_key": "FIX-ME",
-        "build_args": "--platform linux/amd64,linux/arm64",
+        "handler": "src.komatsu_komtrax.handler",
+        "lambda_config": {
+            "Runtime": "python3.13",
+            "Timeout": 300,
+            "MemorySize": 128,
+            "Handler": "src.komatsu_komtrax.handler"
+        },
+        "organisation_id": null,
+        "key": null,
+        "owner_org_id": null,
+        "code_repo_id": null,
+        "container_registry_profile_id": null,
+        "repo_branch": "main",
+        "image_name": null,
+        "icon_url": "https://companieslogo.com/img/orig/6301.T-2d727627.png?t=1720244490&download=true",
+        "banner_url": "https://companieslogo.com/img/orig/6301.T_BIG-c4ba428f.png?t=1720244490&download=true",
+        "staging_config": {},
+        "export_config_command": null,
+        "run_command": null,
+        "lambda_arn": null,
         "config_schema": {
             "$schema": "https://json-schema.org/draft/2020-12/schema",
             "$id": "",
             "title": "Application Config",
             "type": "object",
             "properties": {
-                "digital_outputs_enabled": {
-                    "title": "Digital Outputs Enabled",
-                    "x-name": "digital_outputs_enabled",
-                    "x-hidden": false,
-                    "type": "boolean",
-                    "default": true
-                },
-                "a_funny_message": {
-                    "title": "A Funny Message",
-                    "x-name": "a_funny_message",
-                    "x-hidden": false,
-                    "type": "string"
-                },
-                "simulator_app_key": {
-                    "format": "doover-application",
-                    "title": "Simulator App Key",
-                    "x-name": "simulator_app_key",
+                "komtrax_api_endpoint": {
+                    "title": "Komtrax API Endpoint",
+                    "x-name": "komtrax_api_endpoint",
                     "x-hidden": false,
                     "type": "string",
-                    "description": "The app key for the simulator"
+                    "description": "Base URL for the Komatsu Komtrax API (ISO-15143-3 / AEMP 2.0)",
+                    "default": "https://api.komtrax.komatsu.com/v1"
+                },
+                "api_key": {
+                    "title": "API Key",
+                    "x-name": "api_key",
+                    "x-hidden": false,
+                    "type": "string",
+                    "description": "Authentication key for the Komtrax API"
+                },
+                "equipment_id": {
+                    "title": "Equipment ID",
+                    "x-name": "equipment_id",
+                    "x-hidden": false,
+                    "type": "string",
+                    "description": "Optional: Specific equipment ID to monitor. Leave blank for all equipment.",
+                    "default": ""
+                },
+                "low_fuel_alert_percent": {
+                    "title": "Low Fuel Alert Percent",
+                    "x-name": "low_fuel_alert_percent",
+                    "x-hidden": false,
+                    "type": "number",
+                    "description": "Alert when fuel level drops below this percentage",
+                    "default": 20.0
+                },
+                "excessive_idle_hours_alert": {
+                    "title": "Excessive Idle Hours Alert",
+                    "x-name": "excessive_idle_hours_alert",
+                    "x-hidden": false,
+                    "type": "number",
+                    "description": "Alert when idle hours exceed this threshold",
+                    "default": 100.0
                 }
             },
             "additionalElements": true,
             "required": [
-                "a_funny_message",
-                "simulator_app_key"
+                "api_key"
             ]
         },
-        "organisation_id": "FIX-ME"
+        "id": "145032261291498249"
     }
 }

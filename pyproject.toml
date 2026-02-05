@@ -1,16 +1,15 @@
 [project]
 name = "komatsu-komtrax"
 version = "0.1.0"
-description = "Add your description here"
+description = "Integrates with Komatsu Komtrax API for equipment monitoring"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    "httpx>=0.28.1",
     "pydoover>=0.4.13",
-    "transitions>=0.9.2",
 ]
 
 [project.scripts]
-doover-app-run = "komatsu_komtrax:main"
 export-config = "komatsu_komtrax.app_config:export"
 
 [build-system]

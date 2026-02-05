@@ -1,55 +1,216 @@
+"""
+Komatsu Komtrax Processor Application
+
+This processor integrates with the Komatsu Komtrax telematics API (ISO-15143-3 / AEMP 2.0)
+for equipment monitoring. It can:
+- Poll the Komtrax API to fetch equipment data
+- Receive inbound equipment data via channel messages
+- Update device UI with equipment status, location, and operational metrics
+- Track equipment health and maintenance alerts
+"""
+
 import logging
-import time
+from datetime import datetime, timezone
 
-from pydoover.docker import Application
-from pydoover import ui
+import httpx
 
-from .app_config import KomatsuKomtraxConfig
+from pydoover.cloud.processor import ProcessorBase
+
 from .app_ui import KomatsuKomtraxUI
-from .app_state import KomatsuKomtraxState
 
 log = logging.getLogger()
 
-class KomatsuKomtraxApplication(Application):
-    config: KomatsuKomtraxConfig  # not necessary, but helps your IDE provide autocomplete!
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+class KomatsuKomtraxProcessor(ProcessorBase):
+    """Processor for Komatsu Komtrax equipment monitoring integration."""
 
-        self.started: float = time.time()
-        self.ui: KomatsuKomtraxUI = None
-        self.state: KomatsuKomtraxState = None
+    def setup(self):
+        """Initialize the processor and set up UI components."""
+        log.info("Setting up Komatsu Komtrax processor")
 
-    async def setup(self):
+        # Initialize UI components
         self.ui = KomatsuKomtraxUI()
-        self.state = KomatsuKomtraxState()
         self.ui_manager.add_children(*self.ui.fetch())
 
-    async def main_loop(self):
-        log.info(f"State is: {self.state.state}")
+        # Get config from deployment
+        self.api_endpoint = self.get_agent_config("api_endpoint") or "https://api.komtrax.komatsu.com/v1"
+        self.api_key = self.get_agent_config("api_key")
+        self.equipment_id = self.get_agent_config("equipment_id")
 
-        # a random value we set inside our simulator. Go check it out in simulators/sample!
-        random_value = self.get_tag("random_value", self.config.sim_app_key.value)
-        log.info("Random value from simulator: %s", random_value)
+    def process(self):
+        """
+        Process incoming messages or scheduled triggers.
 
-        self.ui.update(
-            True,
-            random_value,
-            time.time() - self.started,
-        )
+        Handles:
+        - Equipment data from channel messages
+        - Commands (force_sync, clear_alerts)
+        - Scheduled API polling
+        """
+        log.info("Processing Komatsu Komtrax event")
 
-    @ui.callback("send_alert")
-    async def on_send_alert(self, new_value):
-        log.info(f"Sending alert: {self.ui.test_output.current_value}")
-        await self.publish_to_channel("significantAlerts", self.ui.test_output.current_value)
-        self.ui.send_alert.coerce(None)
+        # Check if we have a message to process
+        if self.message is not None:
+            data = self.message.data
+            log.info(f"Processing message: {data}")
 
-    @ui.callback("test_message")
-    async def on_text_parameter_change(self, new_value):
-        log.info(f"New value for test message: {new_value}")
-        # Set the value as an output to the corresponding variable is this case
-        self.ui.test_output.update(new_value)
+            # Handle different message types
+            if isinstance(data, dict):
+                # Check if this is a command
+                command = data.get("command")
+                if command:
+                    self._handle_command(command, data)
+                else:
+                    # Assume it's equipment data
+                    self._process_equipment_data(data)
+        else:
+            # No message - this is likely a scheduled invocation
+            # Try to fetch data from the API
+            log.info("No message - attempting API fetch")
+            if self.api_key:
+                self._fetch_and_process_equipment_data()
+            else:
+                log.warning("API key not configured, cannot fetch data")
+                self.ui.connection_status.update("Not Configured")
 
-    @ui.callback("charge_mode")
-    async def on_state_command(self, new_value):
-        log.info(f"New value for state command: {new_value}")
+        # Push UI updates
+        self.ui_manager.push()
+
+    def close(self):
+        """Clean up resources after processing."""
+        log.info("Closing Komatsu Komtrax processor")
+
+    def _handle_command(self, command: str, data: dict):
+        """Handle control commands."""
+        log.info(f"Handling command: {command}")
+
+        if command == "force_sync":
+            if self.api_key:
+                self._fetch_and_process_equipment_data()
+            else:
+                log.warning("Cannot force sync - API key not configured")
+
+        elif command == "clear_alerts":
+            log.info("Clearing alerts")
+            self.ui.active_alerts.update("None")
+
+        elif command == "update_config":
+            # Allow runtime config updates
+            if "api_endpoint" in data:
+                self.api_endpoint = data["api_endpoint"]
+            if "api_key" in data:
+                self.api_key = data["api_key"]
+            if "equipment_id" in data:
+                self.equipment_id = data["equipment_id"]
+            log.info("Configuration updated")
+
+    def _fetch_and_process_equipment_data(self):
+        """Fetch equipment data from the Komtrax API and process it."""
+        try:
+            equipment_data = self._fetch_equipment_data()
+            if equipment_data:
+                self._process_equipment_data(equipment_data)
+                self.ui.connection_status.update("Connected")
+        except Exception as e:
+            log.error(f"Error fetching equipment data: {e}")
+            self.ui.connection_status.update("Error")
+
+    def _fetch_equipment_data(self) -> dict | None:
+        """
+        Fetch equipment data from the Komtrax API.
+
+        Uses ISO-15143-3 (AEMP 2.0) telematics API standard.
+
+        Returns:
+            Equipment data dictionary or None on failure
+        """
+        headers = {
+            "Authorization": f"Bearer {self.api_key}",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+        }
+
+        # Build endpoint URL
+        if self.equipment_id:
+            url = f"{self.api_endpoint}/equipment/{self.equipment_id}"
+        else:
+            url = f"{self.api_endpoint}/equipment"
+
+        log.info(f"Fetching equipment data from {url}")
+
+        # Use synchronous httpx for ProcessorBase (non-async)
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                response = client.get(url, headers=headers)
+                response.raise_for_status()
+                return response.json()
+        except httpx.HTTPStatusError as e:
+            log.error(f"HTTP error from Komtrax API: {e.response.status_code}")
+            raise
+        except httpx.RequestError as e:
+            log.error(f"Request error to Komtrax API: {e}")
+            raise
+
+    def _process_equipment_data(self, data: dict):
+        """
+        Process equipment data and update UI.
+
+        Expected data format (ISO-15143-3 / AEMP 2.0 compatible):
+        {
+            "equipment_id": "KOM-12345",
+            "model": "PC200-8",
+            "serial_number": "12345",
+            "location": {"latitude": 35.6762, "longitude": 139.6503},
+            "operating_hours": 5432.5,
+            "idle_hours": 1234.2,
+            "fuel_level_percent": 75,
+            "engine_status": "running",
+            "fault_codes": [],
+            "last_communication": "2026-02-05T10:30:00Z"
+        }
+        """
+        log.info(f"Processing equipment data: {data.get('equipment_id', 'unknown')}")
+
+        # Update UI components
+        self.ui.equipment_id.update(data.get("equipment_id", "N/A"))
+        self.ui.model.update(data.get("model", "N/A"))
+
+        # Location
+        location = data.get("location", {})
+        if location:
+            lat = location.get("latitude", 0)
+            lon = location.get("longitude", 0)
+            self.ui.location.update(f"{lat:.4f}, {lon:.4f}")
+
+        # Operating metrics
+        operating_hours = data.get("operating_hours")
+        if operating_hours is not None:
+            self.ui.operating_hours.update(operating_hours)
+
+        idle_hours = data.get("idle_hours")
+        if idle_hours is not None:
+            self.ui.idle_hours.update(idle_hours)
+
+        fuel_level = data.get("fuel_level_percent")
+        if fuel_level is not None:
+            self.ui.fuel_level.update(fuel_level)
+
+        # Engine status
+        engine_status = data.get("engine_status", "unknown")
+        self.ui.engine_status.update(engine_status.title())
+
+        # Fault codes / alerts
+        fault_codes = data.get("fault_codes", [])
+        if fault_codes:
+            self.ui.active_alerts.update(", ".join(str(c) for c in fault_codes))
+        else:
+            self.ui.active_alerts.update("None")
+
+        # Connection status
+        last_comm = data.get("last_communication")
+        if last_comm:
+            self.ui.last_communication.update(last_comm)
+            self.ui.connection_status.update("Connected")
+        else:
+            self.ui.connection_status.update("Unknown")
+
+        log.info(f"UI updated for equipment {data.get('equipment_id', 'unknown')}")

@@ -1,10 +1,13 @@
-from pydoover.docker import run_app
+"""
+Komatsu Komtrax Processor
 
-from .application import KomatsuKomtraxApplication
-from .app_config import KomatsuKomtraxConfig
+Lambda handler entry point for the Komatsu Komtrax equipment monitoring processor.
+"""
 
-def main():
-    """
-    Run the application.
-    """
-    run_app(KomatsuKomtraxApplication(config=KomatsuKomtraxConfig()))
+from .application import KomatsuKomtraxProcessor
+
+
+def handler(event, context):
+    """Lambda handler entry point for Komatsu Komtrax processor."""
+    processor = KomatsuKomtraxProcessor(**event)
+    processor.execute()
